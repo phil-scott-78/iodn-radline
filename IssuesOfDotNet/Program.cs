@@ -21,16 +21,22 @@ namespace IssuesOfDotNet
 
         static async Task Main()
         {
+            var provider = new MyServiceProvider(HttpClient);
+
             do
             {
-                var editor = new LineEditor()
+                var editor = new LineEditor(provider: provider)
                 {
-                    Completion = new QueryCompletion(),
                     Highlighter = new WordHighlighter()
+                        .AddWord("is", new Style(Color.Blue))
                         .AddWord(":", new Style(Color.White))
                         .AddWord("(", new Style(Color.Green))
                         .AddWord(")", new Style(Color.Green))
                 };
+
+                // Register new key bindings
+                editor.KeyBindings.Add(ConsoleKey.Tab, () => new MyAutoCompletionCommand(AutoComplete.Next));
+                editor.KeyBindings.Add(ConsoleKey.Tab, ConsoleModifiers.Shift, () => new MyAutoCompletionCommand(AutoComplete.Previous));
 
                 var result = await editor.ReadLine(CancellationToken.None);
                 if (string.IsNullOrWhiteSpace(result)) return;
