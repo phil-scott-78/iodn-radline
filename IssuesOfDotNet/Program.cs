@@ -4,8 +4,6 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Net.Http.Json;
-using System.Text.Encodings.Web;
 using System.Threading;
 using System.Threading.Tasks;
 using CsvHelper;
@@ -23,23 +21,51 @@ namespace IssuesOfDotNet
         {
             var provider = new MyServiceProvider(HttpClient);
 
+            var keywords = new[]
+            {
+                "area", "area-under", "area-node", "area-owner", "area-lead",
+                "type", "is", "in", "user", "org", "repo", "state", "author", "assignee",
+                "mentions", "team", "commenter", "involves", "linked", "label", "milestone",
+                "project", "status", "SHA", "head", "base", "language", "comments", "interactions",
+                "reactions", "draft", "review", "reviewed-by", "review-requested", "team-review-requested",
+                "created", "updated", "closed", "merged", "archived", "no"
+            };
+
+            var parenStyle = new Style(Color.Green);
+            var keywordStyle = new Style(Color.Purple);
+
+            var wordHighlighter = new WordHighlighter()
+                .AddWord("(", parenStyle)
+                .AddWord(")", parenStyle);
+
+            foreach (var keyword in keywords)
+            {
+                wordHighlighter.AddWord(keyword, keywordStyle);
+            }
+
+            var editor = new LineEditor(provider: provider)
+            {
+                Highlighter = wordHighlighter
+            };
+
+            // Register new key bindings
+            static MyAutoCompletionCommand NextAutoComplete() => new(AutoComplete.Next);
+            static MyAutoCompletionCommand PreviousAutoComplete() => new(AutoComplete.Previous);
+
+            editor.KeyBindings.Add(ConsoleKey.Tab, NextAutoComplete);
+            editor.KeyBindings.Add(ConsoleKey.Spacebar, ConsoleModifiers.Control, NextAutoComplete);
+            editor.KeyBindings.Add(ConsoleKey.Tab, ConsoleModifiers.Shift, PreviousAutoComplete);
+
             do
             {
-                var editor = new LineEditor(provider: provider)
-                {
-                    Highlighter = new WordHighlighter()
-                        .AddWord("is", new Style(Color.Blue))
-                        .AddWord(":", new Style(Color.White))
-                        .AddWord("(", new Style(Color.Green))
-                        .AddWord(")", new Style(Color.Green))
-                };
-
-                // Register new key bindings
-                editor.KeyBindings.Add(ConsoleKey.Tab, () => new MyAutoCompletionCommand(AutoComplete.Next));
-                editor.KeyBindings.Add(ConsoleKey.Tab, ConsoleModifiers.Shift, () => new MyAutoCompletionCommand(AutoComplete.Previous));
-
                 var result = await editor.ReadLine(CancellationToken.None);
                 if (string.IsNullOrWhiteSpace(result)) return;
+
+                if (result.Equals("clear()"))
+                {
+                    AnsiConsole.Clear();
+                    continue;
+                }
 
                 var issues = (await GetIssues(result)).ToList();
                 if (issues.Any() == false)
@@ -91,33 +117,7 @@ namespace IssuesOfDotNet
             using var csv = new CsvReader(reader, config);
             return csv.GetRecords<IssueResults>().ToList();
         }
-
-        private class QueryCompletion : ITextCompletion
-        {
-            public IEnumerable<string>? GetCompletions(string prefix, string word, string suffix)
-            {
-                var encoded = UrlEncoder.Default.Encode(prefix + word);
-                var pos = prefix.Length + word.Length;
-                var url = @$"https://issuesof.net/api/completion?q={encoded}&pos={pos}";
-                var result = HttpClient.GetFromJsonAsync<AutoCompleteResults>(url).Result;
-
-                if (result?.List == null) yield break;
-
-                string prefixWord = word.Contains(":", StringComparison.InvariantCulture)
-                    ? word[..(word.IndexOf(":", StringComparison.InvariantCulture) + 1)]
-                    : word;
-
-                foreach (var autoCompleteResult in result.List)
-                {
-                    yield return autoCompleteResult.StartsWith(word, StringComparison.InvariantCultureIgnoreCase)
-                        ? autoCompleteResult
-                        : prefixWord + autoCompleteResult;
-                }
-            }
-        }
     }
-
-    public record AutoCompleteResults (List<string> List, int From, int To);
 
     public record IssueResults(string Org, string Repo, string Type, string State, int Number, string Title);
 }
